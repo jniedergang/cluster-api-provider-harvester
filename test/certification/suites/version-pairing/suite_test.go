@@ -177,11 +177,16 @@ func deployCAPIOperator(config *clusterctl.E2EConfig, proxy capiframework.Cluste
 // applyProviderTemplate renders an envsubst provider manifest (${CAPI_VERSION},
 // ${CAPHV_VERSION}, ${CAPHV_COMPONENTS_URL} come from the e2e config variables
 // exported to the environment) and applies it to the management cluster.
+// The apply retries: the operator chart install waits for the Deployment to be
+// Available, but its admission webhook endpoint can lag behind by a few
+// seconds (connection refused), especially on slow CI runners.
 func applyProviderTemplate(proxy capiframework.ClusterProxy, template []byte) {
-	Expect(turtlesframework.ApplyFromTemplate(ctx, turtlesframework.ApplyFromTemplateInput{
-		Proxy:    proxy,
-		Template: template,
-	})).To(Succeed(), "Failed to apply provider manifest")
+	Eventually(func() error {
+		return turtlesframework.ApplyFromTemplate(ctx, turtlesframework.ApplyFromTemplateInput{
+			Proxy:    proxy,
+			Template: template,
+		})
+	}, "2m", "10s").Should(Succeed(), "Failed to apply provider manifest")
 }
 
 // waitForProviderReady blocks until the given cluster-api-operator provider reports
