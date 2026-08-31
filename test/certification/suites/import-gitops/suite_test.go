@@ -268,10 +268,37 @@ var _ = SynchronizedBeforeSuite(
 							known[name] = state
 							if induceDeletion && !induced && name != "local" {
 								induced = true
-								GinkgoWriter.Printf("[v3-audit] %s INDUCING deletion of record %s (turtles#2641 probe)\n", time.Now().UTC().Format(time.RFC3339), name)
+								// Probe v3: hold the record in deleting state with an extra
+								// finalizer, so reconciles observe it mid-deletion the way a
+								// loaded Rancher does (minutes-long finalization in July).
+								holders := append(it.GetFinalizers(), "caphv.probe/hold")
+								it.SetFinalizers(holders)
+								if err := proxy.GetClient().Update(ctx, it); err != nil {
+									GinkgoWriter.Printf("[v3-audit] hold finalizer FAILED: %v\n", err)
+								}
+								GinkgoWriter.Printf("[v3-audit] %s INDUCING deletion of record %s (held by finalizer, turtles#2641 probe)\n", time.Now().UTC().Format(time.RFC3339), name)
 								if err := proxy.GetClient().Delete(ctx, it); err != nil {
 									GinkgoWriter.Printf("[v3-audit] induced deletion FAILED: %v\n", err)
 								}
+								// Release the hold after 90s so teardown never wedges.
+								go func(recName string) {
+									defer func() { _ = recover() }()
+									time.Sleep(90 * time.Second)
+									rec := &unstructured.Unstructured{}
+									rec.SetGroupVersionKind(schema.GroupVersionKind{Group: "management.cattle.io", Version: "v3", Kind: "Cluster"})
+									if err := proxy.GetClient().Get(ctx, client.ObjectKey{Name: recName}, rec); err != nil {
+										return
+									}
+									kept := []string{}
+									for _, f := range rec.GetFinalizers() {
+										if f != "caphv.probe/hold" {
+											kept = append(kept, f)
+										}
+									}
+									rec.SetFinalizers(kept)
+									_ = proxy.GetClient().Update(ctx, rec)
+									GinkgoWriter.Printf("[v3-audit] %s hold finalizer released on %s\n", time.Now().UTC().Format(time.RFC3339), recName)
+								}(name)
 								// Force an immediate reconcile of the CAPI cluster so the
 								// controller observes the record while it is still deleting
 								// (finalizers keep it around for a few seconds): that is the
