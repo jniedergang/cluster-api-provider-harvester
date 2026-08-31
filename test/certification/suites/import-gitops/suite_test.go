@@ -272,6 +272,26 @@ var _ = SynchronizedBeforeSuite(
 								if err := proxy.GetClient().Delete(ctx, it); err != nil {
 									GinkgoWriter.Printf("[v3-audit] induced deletion FAILED: %v\n", err)
 								}
+								// Force an immediate reconcile of the CAPI cluster so the
+								// controller observes the record while it is still deleting
+								// (finalizers keep it around for a few seconds): that is the
+								// window in which reconcile annotates imported=true.
+								capiClusters := &clusterv1.ClusterList{}
+								if err := proxy.GetClient().List(ctx, capiClusters); err == nil {
+									for j := range capiClusters.Items {
+										cc := &capiClusters.Items[j]
+										if cc.Namespace == "local" || !cc.DeletionTimestamp.IsZero() {
+											continue
+										}
+										if cc.Annotations == nil {
+											cc.Annotations = map[string]string{}
+										}
+										cc.Annotations["caphv-probe-poke"] = time.Now().UTC().Format(time.RFC3339)
+										if err := proxy.GetClient().Update(ctx, cc); err == nil {
+											GinkgoWriter.Printf("[v3-audit] poked CAPI cluster %s/%s to force a reconcile during the deletion window\n", cc.Namespace, cc.Name)
+										}
+									}
+								}
 							}
 						} else if prev != state {
 							GinkgoWriter.Printf("[v3-audit] %s record %s CHANGED (%q -> %q)\n", time.Now().UTC().Format(time.RFC3339), name, prev, state)
