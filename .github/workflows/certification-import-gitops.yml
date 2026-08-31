@@ -18,6 +18,10 @@ on:
         description: "turtles#2641 repro: disable the premature-import annotation watcher"
         type: boolean
         default: false
+      induce_record_deletion:
+        description: "turtles#2641 probe: delete the first v3 cluster record once during the import window"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -46,6 +50,7 @@ jobs:
           REGISTRY_MIRROR_ENDPOINT: ${{ vars.REGISTRY_MIRROR_ENDPOINT }}
           # turtles#2641 repro knob (empty on scheduled runs, watcher stays on)
           CAPHV_DISABLE_IMPORT_WORKAROUND: ${{ github.event.inputs.disable_import_workaround || '' }}
+          CAPHV_INDUCE_RECORD_DELETION: ${{ github.event.inputs.induce_record_deletion || '' }}
         run: |
           # The Rancher server-url must be reachable both from inside the kind
           # cluster and from the workload VMs: the runner VM's LAN IP is.
@@ -58,6 +63,7 @@ jobs:
             HARVESTER_KUBECONFIG_B64="$HARVESTER_KUBECONFIG_B64" \
             REGISTRY_MIRROR_ENDPOINT="$REGISTRY_MIRROR_ENDPOINT" \
             CAPHV_DISABLE_IMPORT_WORKAROUND="$CAPHV_DISABLE_IMPORT_WORKAROUND" \
+            CAPHV_INDUCE_RECORD_DELETION="$CAPHV_INDUCE_RECORD_DELETION" \
             ./bin/import-gitops.test -test.timeout 140m -test.v -ginkgo.v
 
       - name: Collect artifacts

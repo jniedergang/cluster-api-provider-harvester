@@ -213,6 +213,18 @@ var _ = SynchronizedBeforeSuite(
 			}
 		}()
 
+		// turtles#2641 deterministic probe: delete the v3 cluster record once,
+		// early in the import window (before the agent manifest exists), to
+		// demonstrate what happens when a record vanishes mid-import. Whatever
+		// deleted the record in the July occurrences, the question here is only
+		// whether the import controller then poisons the live CAPI cluster with
+		// imported=true (design flaw) or recovers by re-importing (theory wrong).
+		induceDeletion := os.Getenv("CAPHV_INDUCE_RECORD_DELETION") == "true"
+		if induceDeletion {
+			By("turtles#2641 probe: will delete the first v3 cluster record once during the import window")
+		}
+		induced := false
+
 		// turtles#2641 forensics: journal every management.cattle.io/v3 Cluster
 		// record appearing or vanishing during the run, so a record replacement
 		// is visible in the logs even when the import succeeds.
@@ -224,7 +236,12 @@ var _ = SynchronizedBeforeSuite(
 					return
 				case <-importWatcherStop:
 					return
-				case <-time.After(5 * time.Second):
+				case <-time.After(func() time.Duration {
+					if induceDeletion && !induced {
+						return time.Second // frapper avant l'application du manifest agent
+					}
+					return 5 * time.Second
+				}()):
 				}
 
 				func() {
@@ -249,6 +266,13 @@ var _ = SynchronizedBeforeSuite(
 						if prev, ok := known[name]; !ok {
 							GinkgoWriter.Printf("[v3-audit] %s record %s APPEARED (displayName=%q)\n", time.Now().UTC().Format(time.RFC3339), name, display)
 							known[name] = state
+							if induceDeletion && !induced && name != "local" {
+								induced = true
+								GinkgoWriter.Printf("[v3-audit] %s INDUCING deletion of record %s (turtles#2641 probe)\n", time.Now().UTC().Format(time.RFC3339), name)
+								if err := proxy.GetClient().Delete(ctx, it); err != nil {
+									GinkgoWriter.Printf("[v3-audit] induced deletion FAILED: %v\n", err)
+								}
+							}
 						} else if prev != state {
 							GinkgoWriter.Printf("[v3-audit] %s record %s CHANGED (%q -> %q)\n", time.Now().UTC().Format(time.RFC3339), name, prev, state)
 							known[name] = state
