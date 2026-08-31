@@ -18,6 +18,8 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/apis/meta/v1/unstructured"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/json"
 	clusterv1 "sigs.k8s.io/cluster-api/api/core/v1beta2"
@@ -206,6 +208,57 @@ var _ = SynchronizedBeforeSuite(
 
 						delete(cl.Annotations, "imported")
 						_ = proxy.GetClient().Update(ctx, cl)
+					}
+				}()
+			}
+		}()
+
+		// turtles#2641 forensics: journal every management.cattle.io/v3 Cluster
+		// record appearing or vanishing during the run, so a record replacement
+		// is visible in the logs even when the import succeeds.
+		go func() {
+			known := map[string]string{}
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-importWatcherStop:
+					return
+				case <-time.After(5 * time.Second):
+				}
+
+				func() {
+					defer func() { _ = recover() }()
+
+					l := &unstructured.UnstructuredList{}
+					l.SetGroupVersionKind(schema.GroupVersionKind{Group: "management.cattle.io", Version: "v3", Kind: "ClusterList"})
+					if err := proxy.GetClient().List(ctx, l); err != nil {
+						return
+					}
+
+					seen := map[string]bool{}
+					for i := range l.Items {
+						it := &l.Items[i]
+						name := it.GetName()
+						seen[name] = true
+						display, _, _ := unstructured.NestedString(it.Object, "spec", "displayName")
+						state := display
+						if !it.GetDeletionTimestamp().IsZero() {
+							state += " deleting"
+						}
+						if prev, ok := known[name]; !ok {
+							GinkgoWriter.Printf("[v3-audit] %s record %s APPEARED (displayName=%q)\n", time.Now().UTC().Format(time.RFC3339), name, display)
+							known[name] = state
+						} else if prev != state {
+							GinkgoWriter.Printf("[v3-audit] %s record %s CHANGED (%q -> %q)\n", time.Now().UTC().Format(time.RFC3339), name, prev, state)
+							known[name] = state
+						}
+					}
+					for name := range known {
+						if !seen[name] {
+							GinkgoWriter.Printf("[v3-audit] %s record %s GONE\n", time.Now().UTC().Format(time.RFC3339), name)
+							delete(known, name)
+						}
 					}
 				}()
 			}
