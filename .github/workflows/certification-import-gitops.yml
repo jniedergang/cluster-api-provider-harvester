@@ -12,7 +12,12 @@ on:
     # Off-peak for the current self-hosted environment, and off the top of the
     # hour (GitHub delays popular schedule slots by up to a few hours).
     - cron: "37 11 * * 1,4"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      disable_import_workaround:
+        description: "turtles#2641 repro: disable the premature-import annotation watcher"
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -39,6 +44,8 @@ jobs:
           # (unauthenticated Docker Hub pulls are rate limited per IP; a full
           # run plus background traffic can starve the control plane pulls).
           REGISTRY_MIRROR_ENDPOINT: ${{ vars.REGISTRY_MIRROR_ENDPOINT }}
+          # turtles#2641 repro knob (empty on scheduled runs, watcher stays on)
+          CAPHV_DISABLE_IMPORT_WORKAROUND: ${{ github.event.inputs.disable_import_workaround || '' }}
         run: |
           # The Rancher server-url must be reachable both from inside the kind
           # cluster and from the workload VMs: the runner VM's LAN IP is.
@@ -50,6 +57,7 @@ jobs:
             RANCHER_HOSTNAME="$RANCHER_HOSTNAME" \
             HARVESTER_KUBECONFIG_B64="$HARVESTER_KUBECONFIG_B64" \
             REGISTRY_MIRROR_ENDPOINT="$REGISTRY_MIRROR_ENDPOINT" \
+            CAPHV_DISABLE_IMPORT_WORKAROUND="$CAPHV_DISABLE_IMPORT_WORKAROUND" \
             ./bin/import-gitops.test -test.timeout 140m -test.v -ginkgo.v
 
       - name: Collect artifacts

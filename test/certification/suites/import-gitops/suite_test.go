@@ -6,6 +6,7 @@ package importgitops
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"sync"
@@ -170,7 +171,14 @@ var _ = SynchronizedBeforeSuite(
 		// was ever applied and the import is never retried (the controller skips
 		// clusters carrying the annotation). Strip it while premature; a genuinely
 		// deleting cluster keeps it (the deletion flow relies on it).
+		if os.Getenv("CAPHV_DISABLE_IMPORT_WORKAROUND") == "true" {
+			By("turtles#2641 repro mode: the premature-import annotation watcher is DISABLED")
+		}
+
 		go func() {
+			if os.Getenv("CAPHV_DISABLE_IMPORT_WORKAROUND") == "true" {
+				return
+			}
 			for {
 				select {
 				case <-ctx.Done():
