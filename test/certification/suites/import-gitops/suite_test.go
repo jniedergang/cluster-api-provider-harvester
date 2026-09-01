@@ -7,6 +7,8 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -77,6 +79,16 @@ var _ = SynchronizedBeforeSuite(
 			Scheme:    e2e.InitScheme(),
 		})
 		proxy := setupClusterResult.BootstrapClusterProxy
+
+		// turtles#2641 standing trap: audit every API call touching the
+		// management.cattle.io cluster records so that a record deleted by an
+		// unidentified actor gets attributed. Injected after creation because
+		// the CAPI kind provider exposes no kubeadm patch hook: editing the
+		// static pod manifest makes the kubelet restart the API server with
+		// audit logging enabled.
+		if os.Getenv("CAPHV_DISABLE_APISERVER_AUDIT") != "true" {
+			enableAPIServerAudit(setupClusterResult.ClusterName, proxy)
+		}
 
 		By("Deploying cert-manager")
 		testenv.DeployCertManager(ctx, testenv.DeployCertManagerInput{
@@ -367,6 +379,10 @@ var _ = SynchronizedAfterSuite(
 	func() {
 		importWatcherStopOnce.Do(func() { close(importWatcherStop) })
 
+		if setupClusterResult != nil && os.Getenv("CAPHV_DISABLE_APISERVER_AUDIT") != "true" {
+			collectAPIServerAudit(setupClusterResult.ClusterName)
+		}
+
 		if bootstrapClusterProxy != nil {
 			// Collects the management cluster state through crust-gather when the
 			// kubectl plugin is installed (scripts/ensure-crust-gather.sh).
@@ -399,4 +415,69 @@ func waitForDeploymentAvailableOn(proxy capiframework.ClusterProxy, name, namesp
 			Namespace: namespace,
 		}},
 	}, intervals...)
+}
+
+// enableAPIServerAudit enables API server audit logging scoped to the
+// management.cattle.io cluster records inside the kind control-plane node.
+// The whole-line substitutions keep kubeadm's indentation explicit, which is
+// sturdier than sed append commands across GNU sed versions.
+func enableAPIServerAudit(clusterName string, proxy capiframework.ClusterProxy) {
+	node := clusterName + "-control-plane"
+
+	By("Enabling API server audit logging for management.cattle.io cluster records on " + node)
+
+	policy := `apiVersion: audit.k8s.io/v1
+kind: Policy
+rules:
+- level: RequestResponse
+  resources:
+  - group: management.cattle.io
+    resources: ["clusters"]
+- level: None
+`
+
+	manifest := "/etc/kubernetes/manifests/kube-apiserver.yaml"
+	steps := [][]string{
+		{"docker", "exec", node, "mkdir", "-p", "/var/log/kubernetes"},
+		{"docker", "exec", "-i", node, "cp", "/dev/stdin", "/etc/kubernetes/audit-policy.yaml"},
+		{"docker", "exec", node, "sed", "-i",
+			"s|^    - kube-apiserver$|    - kube-apiserver\n    - --audit-policy-file=/etc/kubernetes/audit-policy.yaml\n    - --audit-log-path=/var/log/kubernetes/audit.log\n    - --audit-log-maxsize=100\n    - --audit-log-maxbackup=1|", manifest},
+		{"docker", "exec", node, "sed", "-i",
+			"s|^    volumeMounts:$|    volumeMounts:\n    - mountPath: /etc/kubernetes/audit-policy.yaml\n      name: audit-policy\n      readOnly: true\n    - mountPath: /var/log/kubernetes\n      name: audit-logs|", manifest},
+		{"docker", "exec", node, "sed", "-i",
+			"s|^  volumes:$|  volumes:\n  - hostPath:\n      path: /etc/kubernetes/audit-policy.yaml\n      type: File\n    name: audit-policy\n  - hostPath:\n      path: /var/log/kubernetes\n      type: DirectoryOrCreate\n    name: audit-logs|", manifest},
+	}
+
+	for i, args := range steps {
+		cmd := exec.Command(args[0], args[1:]...)
+		if i == 1 {
+			cmd.Stdin = strings.NewReader(policy)
+		}
+		out, err := cmd.CombinedOutput()
+		Expect(err).ToNot(HaveOccurred(), "audit setup step %v failed: %s", args, string(out))
+	}
+
+	// The kubelet restarts the API server with the new flags; wait for it to
+	// come back before the suite piles work on it.
+	Eventually(func(g Gomega) {
+		nsList := &corev1.NamespaceList{}
+		g.Expect(proxy.GetClient().List(ctx, nsList, client.Limit(1))).To(Succeed())
+	}, "5m", "10s").Should(Succeed())
+}
+
+// collectAPIServerAudit saves the audit trail of the management.cattle.io
+// cluster records into the artifacts folder before the kind cluster goes away.
+func collectAPIServerAudit(clusterName string) {
+	artifacts := os.Getenv("ARTIFACTS_FOLDER")
+	if artifacts == "" {
+		return
+	}
+
+	out, err := exec.Command("docker", "exec", clusterName+"-control-plane",
+		"cat", "/var/log/kubernetes/audit.log").Output()
+	if err != nil || len(out) == 0 {
+		return
+	}
+
+	_ = os.WriteFile(filepath.Join(artifacts, "apiserver-audit-managementv3.log"), out, 0o600)
 }
