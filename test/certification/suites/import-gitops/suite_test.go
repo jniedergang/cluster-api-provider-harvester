@@ -441,11 +441,11 @@ rules:
 		{"docker", "exec", node, "mkdir", "-p", "/var/log/kubernetes"},
 		{"docker", "exec", "-i", node, "cp", "/dev/stdin", "/etc/kubernetes/audit-policy.yaml"},
 		{"docker", "exec", node, "sed", "-i",
-			"s|^    - kube-apiserver$|    - kube-apiserver\n    - --audit-policy-file=/etc/kubernetes/audit-policy.yaml\n    - --audit-log-path=/var/log/kubernetes/audit.log\n    - --audit-log-maxsize=100\n    - --audit-log-maxbackup=1|", manifest},
+			`s|^    - kube-apiserver$|    - kube-apiserver\n    - --audit-policy-file=/etc/kubernetes/audit-policy.yaml\n    - --audit-log-path=/var/log/kubernetes/audit.log\n    - --audit-log-maxsize=100\n    - --audit-log-maxbackup=1|`, manifest},
 		{"docker", "exec", node, "sed", "-i",
-			"s|^    volumeMounts:$|    volumeMounts:\n    - mountPath: /etc/kubernetes/audit-policy.yaml\n      name: audit-policy\n      readOnly: true\n    - mountPath: /var/log/kubernetes\n      name: audit-logs|", manifest},
+			`s|^    volumeMounts:$|    volumeMounts:\n    - mountPath: /etc/kubernetes/audit-policy.yaml\n      name: audit-policy\n      readOnly: true\n    - mountPath: /var/log/kubernetes\n      name: audit-logs|`, manifest},
 		{"docker", "exec", node, "sed", "-i",
-			"s|^  volumes:$|  volumes:\n  - hostPath:\n      path: /etc/kubernetes/audit-policy.yaml\n      type: File\n    name: audit-policy\n  - hostPath:\n      path: /var/log/kubernetes\n      type: DirectoryOrCreate\n    name: audit-logs|", manifest},
+			`s|^  volumes:$|  volumes:\n  - hostPath:\n      path: /etc/kubernetes/audit-policy.yaml\n      type: File\n    name: audit-policy\n  - hostPath:\n      path: /var/log/kubernetes\n      type: DirectoryOrCreate\n    name: audit-logs|`, manifest},
 	}
 
 	for i, args := range steps {
