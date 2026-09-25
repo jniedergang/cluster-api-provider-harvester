@@ -2986,8 +2986,11 @@ var _ = Describe("reconcileCloudProviderConfig key and kubeconfig paths", func()
 		Expect(err.Error()).To(ContainSubstring("manifests"))
 	})
 
-	It("should error from GetCloudConfigB64 when ingress-expose service is missing", func() {
-		hvFake := hvfake.NewSimpleClientset()
+	// cloudProviderConfigScope builds a reconciler and a scope whose cloud provider
+	// manifests ConfigMap (ns/cp-cm) holds a placeholder credentials Secret. The Harvester
+	// fake client gets the given objects (Services exposing the VIP, token Secret...).
+	cloudProviderConfigScope := func(hvObjects ...runtime.Object) (*HarvesterClusterReconciler, *ClusterScope, client.Client) {
+		hvFake := hvfake.NewSimpleClientset(hvObjects...)
 		scheme := runtime.NewScheme()
 		_ = corev1.AddToScheme(scheme)
 		_ = infrav1.AddToScheme(scheme)
@@ -3027,9 +3030,72 @@ var _ = Describe("reconcileCloudProviderConfig key and kubeconfig paths", func()
 			ReconcileClient: fakeClient,
 		}
 
+		return r, scope, fakeClient
+	}
+
+	// cloudProviderKubeconfig returns the kubeconfig written into the credentials Secret of
+	// the cloud provider manifests ConfigMap.
+	cloudProviderKubeconfig := func(c client.Client) string {
+		cm := &corev1.ConfigMap{}
+		Expect(c.Get(context.TODO(), types.NamespacedName{Name: "cp-cm", Namespace: "ns"}, cm)).To(Succeed())
+
+		objects, err := locutil.GetSerializedObjects(cm.Data["manifests"])
+		Expect(err).ToNot(HaveOccurred())
+
+		secrets, _, err := locutil.GetSecrets(objects)
+		Expect(err).ToNot(HaveOccurred())
+		Expect(secrets).To(HaveLen(1))
+
+		return string(secrets[0].Data["kubeconfig"])
+	}
+
+	// The cloud provider ServiceAccount token Secret (<cluster name>-token in the target
+	// namespace), pre-filled because the fake client does not run the token controller.
+	cloudProviderTokenSecret := &corev1.Secret{
+		ObjectMeta: metav1.ObjectMeta{Name: "cp-cluster-token", Namespace: "default"},
+		Type:       corev1.SecretTypeServiceAccountToken,
+		Data: map[string][]byte{
+			corev1.ServiceAccountTokenKey:  []byte("token"),
+			corev1.ServiceAccountRootCAKey: []byte("ca"),
+		},
+	}
+
+	It("should point the cloud provider kubeconfig to the ingress-expose VIP (Harvester < v1.9)", func() {
+		r, scope, c := cloudProviderConfigScope(cloudProviderTokenSecret.DeepCopy(), &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "ingress-expose",
+				Namespace: "kube-system",
+			},
+			Status: corev1.ServiceStatus{LoadBalancer: corev1.LoadBalancerStatus{
+				Ingress: []corev1.LoadBalancerIngress{{IP: "172.16.3.100"}},
+			}},
+		})
+
+		Expect(r.reconcileCloudProviderConfig(scope)).To(Succeed())
+		Expect(cloudProviderKubeconfig(c)).To(ContainSubstring("server: https://172.16.3.100:6443"))
+	})
+
+	It("should point the cloud provider kubeconfig to the rke2-traefik VIP when ingress-expose is gone (Harvester v1.9)", func() {
+		r, scope, c := cloudProviderConfigScope(cloudProviderTokenSecret.DeepCopy(), &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "rke2-traefik", Namespace: "kube-system"},
+			Spec:       corev1.ServiceSpec{Type: corev1.ServiceTypeLoadBalancer},
+			Status: corev1.ServiceStatus{LoadBalancer: corev1.LoadBalancerStatus{
+				Ingress: []corev1.LoadBalancerIngress{{IP: "172.16.3.100"}},
+			}},
+		})
+
+		Expect(r.reconcileCloudProviderConfig(scope)).To(Succeed())
+		Expect(cloudProviderKubeconfig(c)).To(ContainSubstring("server: https://172.16.3.100:6443"))
+	})
+
+	It("should error from GetCloudConfigB64 when neither ingress-expose nor rke2-traefik exists", func() {
+		r, scope, _ := cloudProviderConfigScope()
+
 		err := r.reconcileCloudProviderConfig(scope)
 		Expect(err).To(HaveOccurred())
 		Expect(err.Error()).To(ContainSubstring("unable to generate the kubeconfig"))
+		Expect(err.Error()).To(ContainSubstring("ingress-expose"))
+		Expect(err.Error()).To(ContainSubstring("rke2-traefik"))
 	})
 })
 

@@ -4,6 +4,16 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Harvester v1.9 endpoint lookup**: the cloud provider kubeconfig was built
+  from the VIP published on the `kube-system/ingress-expose` Service, which
+  Harvester v1.9 no longer ships, so every cluster failed with "unable to
+  compute the Harvester Endpoint". When `ingress-expose` does not exist, the
+  VIP is now read from the LoadBalancer address of `kube-system/rke2-traefik`
+  (or its `kube-vip.io/loadbalancerIPs` annotation). Older Harvester releases
+  keep the previous behavior.
+
 ## [v0.10.1] - 2026-07-28
 
 ### Fixed
