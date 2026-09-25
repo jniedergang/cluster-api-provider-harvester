@@ -28,6 +28,13 @@ All notable changes to this project are documented in this file.
   CAPI topology controller then failed to clone them ("spec.template.metadata in
   body should have at least 1 properties"). All Harvester objects and references
   now use `infrastructure.cluster.x-k8s.io/v1beta1`, the stored version.
+- **Template conversion no longer writes an empty `spec.template.metadata`**:
+  the conversion webhook serialized an unset template metadata as `{}`, which
+  the CRD schema rejects (`minProperties: 1`). Any template created or read
+  through `v1alpha1` (by users, GitOps sources or CAPI itself) therefore broke
+  template cloning. The field is now omitted when empty, as in the CAPI types.
+  Templates already stored with the empty object keep it until they are
+  recreated.
 
 ## [v0.10.1] - 2026-07-28
 
