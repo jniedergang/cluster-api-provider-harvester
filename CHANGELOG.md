@@ -21,6 +21,13 @@ All notable changes to this project are documented in this file.
   mirrored from `status.ready` where the status is patched, as the
   HarvesterCluster already did; existing stuck machines recover on their next
   reconcile.
+- **`caphv-generate` emits the `v1beta1` API**: the generator still wrote the
+  HarvesterClusterTemplate, the HarvesterMachineTemplates and every ClusterClass
+  reference and patch selector at the deprecated `v1alpha1`. Templates created
+  through `v1alpha1` were stored with an empty `spec.template.metadata`, and the
+  CAPI topology controller then failed to clone them ("spec.template.metadata in
+  body should have at least 1 properties"). All Harvester objects and references
+  now use `infrastructure.cluster.x-k8s.io/v1beta1`, the stored version.
 
 ## [v0.10.1] - 2026-07-28
 
