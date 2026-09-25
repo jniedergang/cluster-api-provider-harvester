@@ -2076,6 +2076,10 @@ var _ = Describe("ReconcileNormal", func() {
 		// VM was just created and its node cannot be initialized yet, so the
 		// reconcile requeues until the node registers and gets its providerID
 		Expect(result.RequeueAfter).To(Equal(requeueDelay))
+		// The end of the reconcile reports the machine ready: the v1beta2 contract field
+		// the CAPI core reads must say the same.
+		Expect(scope.HarvesterMachine.Status.Ready).To(BeTrue())
+		Expect(scope.HarvesterMachine.Status.Initialization.Provisioned).To(BeTrue())
 
 		// Verify the VM was created on Harvester
 		createdVM, getErr := hvClient.KubevirtV1().VirtualMachines("default").Get(context.TODO(), "test-cp-0", metav1.GetOptions{})
@@ -2368,6 +2372,9 @@ var _ = Describe("ReconcileNormal", func() {
 		Expect(err).ToNot(HaveOccurred())
 		Expect(result.RequeueAfter).To(Equal(requeueDelay))
 		Expect(scope.HarvesterMachine.Status.Ready).To(BeTrue())
+		// The machine started ready with an empty initialization (the state a stuck
+		// cluster shows): this path must report provisioned too.
+		Expect(scope.HarvesterMachine.Status.Initialization.Provisioned).To(BeTrue())
 		Expect(scope.HarvesterMachine.Spec.ProviderID).To(Equal("harvester://already-set"))
 	})
 

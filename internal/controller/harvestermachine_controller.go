@@ -135,6 +135,8 @@ func (r *HarvesterMachineReconciler) Reconcile(ctx context.Context, req ctrl.Req
 
 	// Always attempt to Patch the HarvesterMachine object and status after each reconciliation.
 	defer func() {
+		syncInitializationWithReady(hvMachine)
+
 		err := patchHelper.Patch(ctx,
 			hvMachine,
 		// conditions.WithOwnedConditions( []string{ clusterv1.ReadyCondition}),
@@ -229,6 +231,16 @@ func (r *HarvesterMachineReconciler) Reconcile(ctx context.Context, req ctrl.Req
 	}
 
 	return r.ReconcileNormal(&hvScope) //nolint:contextcheck
+}
+
+// syncInitializationWithReady mirrors status.ready (v1beta1 contract) into
+// status.initialization.provisioned (v1beta2 contract). CAPI reads whichever field matches
+// the CRD's contract label, v1beta2 (initialization.provisioned) with the current labels:
+// a machine reporting ready without initialization.provisioned stays Provisioning forever.
+// Called at the single point where the status is patched, so that no reconcile path can
+// leave the two fields diverging.
+func syncInitializationWithReady(hvMachine *infrav1.HarvesterMachine) {
+	hvMachine.Status.Initialization.Provisioned = hvMachine.Status.Ready
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -538,6 +550,7 @@ func (r *HarvesterMachineReconciler) ReconcileNormal(hvScope *Scope) (res reconc
 	}
 
 	hvScope.HarvesterMachine.Status.Ready = true
+	hvScope.HarvesterMachine.Status.Initialization = machineInitializationProvisioned
 
 	// Initialize workload cluster node: set providerID and remove uninitialized taint.
 	// This bypasses the cloud-provider bootstrap chicken-and-egg problem.

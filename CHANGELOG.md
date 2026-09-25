@@ -13,6 +13,14 @@ All notable changes to this project are documented in this file.
   VIP is now read from the LoadBalancer address of `kube-system/rke2-traefik`
   (or its `kube-vip.io/loadbalancerIPs` annotation). Older Harvester releases
   keep the previous behavior.
+- **Machines stuck in Provisioning with the v1beta2 contract**: the CRDs
+  declare the `cluster.x-k8s.io/v1beta2` contract, so the CAPI core (v1.13)
+  reads `status.initialization.provisioned` of a HarvesterMachine. The end
+  of a successful reconcile set `status.ready` without it, leaving machines
+  with `ready: true` and an empty `initialization` forever. The field is now
+  mirrored from `status.ready` where the status is patched, as the
+  HarvesterCluster already did; existing stuck machines recover on their next
+  reconcile.
 
 ## [v0.10.1] - 2026-07-28
 
