@@ -4,6 +4,17 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Static IP not applied on images with predictable interface names (SLE 16)**:
+  the cloud-init network config named interfaces `eth0`, `eth1`, ..., which only
+  matched images with legacy naming. On SLE 16 (`enp1s0`) a machine using an
+  IPPool never got its allocated address. Each VM interface now gets a stable
+  MAC address derived from the HarvesterMachine UID and the network config
+  matches NICs by that address, whatever name the image uses. The DHCP
+  workaround finds the interface by MAC and is skipped when ISC `dhclient` is
+  not installed.
+
 ## [v0.10.1] - 2026-07-28
 
 ### Fixed
