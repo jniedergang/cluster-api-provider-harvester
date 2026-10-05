@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Fixed
+
+- **VM volumes could be left behind after machine deletion**: Harvester
+  creates the PVCs of a VM without owner reference and only deletes them with
+  the VM when they are listed in the
+  `harvesterhci.io/removedPersistentVolumeClaims` annotation, which CAPHV never
+  set: it relied on a cleanup by name prefix that ran once the VM was gone,
+  logged its errors and removed the machine finalizer anyway. CAPHV now sets
+  the annotation before deleting the VM, as the Harvester API, the Rancher node
+  driver and the Terraform provider do, and deletes the VM with foreground
+  propagation. Hotplugged volumes are left alone. The prefix cleanup stays for a
+  VM deleted outside CAPHV, but a PVC it cannot delete now keeps the finalizer
+  and is retried. The Harvester identity of the cluster now needs the `patch`
+  verb on VirtualMachines, and a failure to list PersistentVolumeClaims now
+  blocks the deletion instead of being ignored.
+
 ## [v0.10.1] - 2026-07-28
 
 ### Fixed

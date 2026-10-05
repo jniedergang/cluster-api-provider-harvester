@@ -3020,7 +3020,7 @@ var _ = Describe("deletePVCsByPrefix", func() {
 			Logger:          &logger,
 		}
 		r := &HarvesterMachineReconciler{}
-		r.deletePVCsByPrefix(context.TODO(), scope, "default", "test-vm-disk-")
+		Expect(r.deletePVCsByPrefix(context.TODO(), scope, "default", "test-vm-disk-")).To(Succeed())
 
 		pvcs, err := hvClient.CoreV1().PersistentVolumeClaims("default").List(context.TODO(), metav1.ListOptions{})
 		Expect(err).ToNot(HaveOccurred())
@@ -3040,7 +3040,7 @@ var _ = Describe("deletePVCsByPrefix", func() {
 			Logger:          &logger,
 		}
 		r := &HarvesterMachineReconciler{}
-		r.deletePVCsByPrefix(context.TODO(), scope, "default", "test-vm-disk-")
+		Expect(r.deletePVCsByPrefix(context.TODO(), scope, "default", "test-vm-disk-")).To(Succeed())
 
 		pvcs, err := hvClient.CoreV1().PersistentVolumeClaims("default").List(context.TODO(), metav1.ListOptions{})
 		Expect(err).ToNot(HaveOccurred())
@@ -3056,8 +3056,7 @@ var _ = Describe("deletePVCsByPrefix", func() {
 			Logger:          &logger,
 		}
 		r := &HarvesterMachineReconciler{}
-		r.deletePVCsByPrefix(context.TODO(), scope, "default", "test-vm-disk-")
-		// Should not panic, just do nothing
+		Expect(r.deletePVCsByPrefix(context.TODO(), scope, "default", "test-vm-disk-")).To(Succeed())
 	})
 })
 
