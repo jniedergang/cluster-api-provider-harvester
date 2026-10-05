@@ -10,8 +10,8 @@ All notable changes to this project are documented in this file.
   from the VIP published on the `kube-system/ingress-expose` Service, which
   Harvester v1.9 no longer ships, so every cluster failed with "unable to
   compute the Harvester Endpoint". When `ingress-expose` does not exist, the
-  VIP is now read from the LoadBalancer address of `kube-system/rke2-traefik`
-  (or its `kube-vip.io/loadbalancerIPs` annotation). Older Harvester releases
+  VIP is now read from the LoadBalancer address of `kube-system/rke2-traefik`,
+  extracted exactly as it was from `ingress-expose`. Older Harvester releases
   keep the previous behavior.
 - **Machines stuck in Provisioning with the v1beta2 contract**: the CRDs
   declare the `cluster.x-k8s.io/v1beta2` contract, so the CAPI core (v1.13)

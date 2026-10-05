@@ -46,10 +46,9 @@ const (
 	cloudProviderRoleName = "harvesterhci.io:cloudprovider"
 	maxNumberOfSecrets    = 15
 
-	harvesterVIPServiceNamespace     = "kube-system"
-	legacyVIPServiceName             = "ingress-expose"
-	traefikVIPServiceName            = "rke2-traefik"
-	kubeVIPLoadBalancerIPsAnnotation = "kube-vip.io/loadbalancerIPs"
+	harvesterVIPServiceNamespace = "kube-system"
+	legacyVIPServiceName         = "ingress-expose"
+	traefikVIPServiceName        = "rke2-traefik"
 )
 
 // GetCloudConfigB64 returns the kubeconfig for the service account.
@@ -184,57 +183,33 @@ func getKubeConfig(ctx context.Context, hvClient lbclient.Interface, saName stri
 	return base64.StdEncoding.EncodeToString([]byte(kubeconfig)), nil
 }
 
-// getHarvesterVIP returns the IPv4 address of the Harvester management VIP, read from
-// the Services that kube-vip exposes in kube-system.
+// getHarvesterVIP returns the IPv4 address of the Harvester management VIP: the LoadBalancer
+// address of the Service through which kube-vip exposes it in kube-system.
 //
-// Harvester up to v1.8 exposes the VIP as the LoadBalancer address of the ingress-expose
-// Service. Harvester v1.9 removed that Service: the VIP is the LoadBalancer address of the
-// rke2-traefik Service. ingress-expose is read first and, when it exists, keeps its current
-// behavior: an error when no address is allocated yet, "" (the caller keeps the server URL
-// it was given) when the address is not shaped like IPv4. rke2-traefik is only consulted
-// when ingress-expose does not exist, and an error is returned when it yields no IPv4
-// address either (the LoadBalancer may still be pending: the caller requeues).
+// Harvester up to v1.8 exposes the VIP through the ingress-expose Service, Harvester v1.9
+// through rke2-traefik, so rke2-traefik is only read when ingress-expose does not exist.
+// The address is extracted the same way from both: an error when none is allocated yet
+// (the caller requeues), "" (the caller keeps the server URL it was given) when it is not
+// shaped like IPv4.
 func getHarvesterVIP(ctx context.Context, hvClient lbclient.Interface) (string, error) {
 	services := hvClient.CoreV1().Services(harvesterVIPServiceNamespace)
 
-	legacySVC, err := services.Get(ctx, legacyVIPServiceName, metav1.GetOptions{})
-	if err == nil {
-		return legacyVIPFromService(legacySVC)
-	}
-
-	if !apierrors.IsNotFound(err) {
+	vipSVC, err := services.Get(ctx, legacyVIPServiceName, metav1.GetOptions{})
+	if apierrors.IsNotFound(err) {
+		vipSVC, err = services.Get(ctx, traefikVIPServiceName, metav1.GetOptions{})
+		if err != nil {
+			return "", errors.Wrap(err, "unable to compute the Harvester Endpoint: the ingress-expose service (Harvester < v1.9) "+
+				"does not exist and the rke2-traefik service (Harvester >= v1.9) could not be read")
+		}
+	} else if err != nil {
 		return "", errors.Wrap(err, "unable to compute the Harvester Endpoint: problem in getting the ingress-expose service")
 	}
 
-	traefikSVC, err := services.Get(ctx, traefikVIPServiceName, metav1.GetOptions{})
-	if err != nil {
-		return "", errors.Wrap(err, "unable to compute the Harvester Endpoint: the ingress-expose service (Harvester < v1.9) "+
-			"does not exist and the rke2-traefik service (Harvester >= v1.9) could not be read")
+	if len(vipSVC.Status.LoadBalancer.Ingress) == 0 {
+		return "", errors.Errorf("unable to compute the Harvester Endpoint: no ip allocated in the %s service", vipSVC.Name)
 	}
 
-	for _, ingress := range traefikSVC.Status.LoadBalancer.Ingress {
-		if ip := firstIPv4(ingress.IP); ip != "" {
-			return ip, nil
-		}
-	}
-
-	if ip := firstIPv4(traefikSVC.Annotations[kubeVIPLoadBalancerIPsAnnotation]); ip != "" {
-		return ip, nil
-	}
-
-	return "", errors.New("unable to compute the Harvester Endpoint: the ingress-expose service (Harvester < v1.9) does not exist " +
-		"and the rke2-traefik service (Harvester >= v1.9) has no IPv4 LoadBalancer address yet")
-}
-
-// legacyVIPFromService reads the VIP from the ingress-expose Service the way Harvester
-// < v1.9 publishes it: the first LoadBalancer address, used as is when it is shaped like
-// IPv4.
-func legacyVIPFromService(svc *corev1.Service) (string, error) {
-	if len(svc.Status.LoadBalancer.Ingress) == 0 {
-		return "", errors.New("unable to compute the Harvester Endpoint: no ip allocated in the ingress-expose service")
-	}
-
-	vipIP := svc.Status.LoadBalancer.Ingress[0].IP
+	vipIP := vipSVC.Status.LoadBalancer.Ingress[0].IP
 
 	ok, err := re.MatchString(`\d+\.\d+\.\d+\.\d+`, vipIP)
 	if ok && err == nil {
@@ -242,19 +217,6 @@ func legacyVIPFromService(svc *corev1.Service) (string, error) {
 	}
 
 	return "", nil
-}
-
-// firstIPv4 returns the first usable IPv4 address of a comma-separated list (the format of
-// the kube-vip.io/loadbalancerIPs annotation, also valid for a single address), or "".
-func firstIPv4(value string) string {
-	for candidate := range strings.SplitSeq(value, ",") {
-		ip := net.ParseIP(strings.TrimSpace(candidate))
-		if ip != nil && ip.To4() != nil && !ip.IsUnspecified() {
-			return ip.String()
-		}
-	}
-
-	return ""
 }
 
 // buildKubeconfigFromSecret builds a kubeconfig from a secret content.
